@@ -58,6 +58,7 @@ import java.io.OutputStream;
 public class BluetoothClassicService extends BluetoothService {
 
     private static final String TAG = BluetoothClassicService.class.getSimpleName();
+    private static final Integer MAX_CONNECTION_ATTEMPS = 5;
 
     // Unique UUID for this application
     //private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805f9b34fb");
@@ -259,7 +260,18 @@ public class BluetoothClassicService extends BluetoothService {
             try {
                 // This is a blocking call and will only return on a
                 // successful connection or an exception
-                mmSocket.connect();
+                for (int attempts = 0; attempts < MAX_CONNECTION_ATTEMPS; attempts++) {
+                    try {
+                        mmSocket.connect();
+                        break;
+                    } catch (Exception e) {
+                        if (attempts == MAX_CONNECTION_ATTEMPS - 1) {
+                            throw e;
+                        }
+
+                        Log.e(TAG, "connection error - retry", e);
+                    }
+                }
             } catch (Exception e) {
                 e.printStackTrace();
                 connectionFailed();
