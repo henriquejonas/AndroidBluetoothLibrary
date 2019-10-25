@@ -239,11 +239,11 @@ public class BluetoothClassicService extends BluetoothService {
             mmDevice = device;
             uuidCandidates = new ArrayList<>();
 
-            uuidCandidates.add(mConfig.uuid);
-
             for (ParcelUuid uuid : device.getUuids()) {
                 uuidCandidates.add(uuid.getUuid());
             }
+
+            uuidCandidates.add(mConfig.uuid);
         }
 
         @RequiresPermission(allOf = {Manifest.permission.BLUETOOTH, Manifest.permission.BLUETOOTH_ADMIN})
