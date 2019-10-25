@@ -45,12 +45,21 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.media.AudioManager;
+import android.os.ParcelUuid;
 import android.support.annotation.RequiresPermission;
 import android.util.Log;
 
+import com.github.douglasjunior.bluetoothclassiclibrary.sockets.BluetoothSocketWrapper;
+import com.github.douglasjunior.bluetoothclassiclibrary.sockets.FallbackBluetoothSocket;
+import com.github.douglasjunior.bluetoothclassiclibrary.sockets.FallbackException;
+import com.github.douglasjunior.bluetoothclassiclibrary.sockets.NativeBluetoothSocket;
+
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * Code adapted from Android Open Source Project
@@ -221,66 +230,67 @@ public class BluetoothClassicService extends BluetoothService {
      * connection either succeeds or fails.
      */
     private class ConnectThread extends Thread {
-        private final BluetoothSocket mmSocket;
+        private BluetoothSocketWrapper mmSocket;
         private final BluetoothDevice mmDevice;
+        private List<UUID> uuidCandidates;
 
         @RequiresPermission(Manifest.permission.BLUETOOTH)
         public ConnectThread(BluetoothDevice device) {
             mmDevice = device;
-            BluetoothSocket tmp = null;
+            uuidCandidates = new ArrayList<>();
 
-            // Get a BluetoothSocket for a connection with the given BluetoothDevice
-            try {
-                tmp = device.createRfcommSocketToServiceRecord(mConfig.uuid);
-            } catch (Exception e) {
-                Log.e(TAG, "create() failed", e);
+            uuidCandidates.add(mConfig.uuid);
+
+            for (ParcelUuid uuid : device.getUuids()) {
+                uuidCandidates.add(uuid.getUuid());
             }
-            try {
-                AudioManager mAudioManager = (AudioManager) mConfig.context.getSystemService(Context.AUDIO_SERVICE);
-                //For phone speaker(loadspeaker)
-                mAudioManager.setMode(AudioManager.MODE_NORMAL);
-                mAudioManager.setBluetoothScoOn(false);
-                mAudioManager.setSpeakerphoneOn(true);
-            } catch (Exception ex) {
-                ex.printStackTrace();
-            }
-            mmSocket = tmp;
         }
 
         @RequiresPermission(allOf = {Manifest.permission.BLUETOOTH, Manifest.permission.BLUETOOTH_ADMIN})
         public void run() {
+            boolean isSucceed = false;
+
             Log.i(TAG, "BEGIN mConnectThread");
             setName("ConnectThread");
 
-            // Always cancel discovery because it will slow down a connection
-            if (mAdapter.isDiscovering())
+            for (UUID uuid : uuidCandidates) {
+                // Always cancel discovery because it will slow down a connection
                 mAdapter.cancelDiscovery();
 
-            // Make a connection to the BluetoothSocket
-            try {
-                // This is a blocking call and will only return on a
-                // successful connection or an exception
-                for (int attempts = 0; attempts < MAX_CONNECTION_ATTEMPS; attempts++) {
-                    try {
-                        mmSocket.connect();
-                        break;
-                    } catch (Exception e) {
-                        if (attempts == MAX_CONNECTION_ATTEMPS - 1) {
-                            throw e;
-                        }
+                // Make a connection to the BluetoothSocket
+                try {
+                    // This is a blocking call and will only return on a
+                    // successful connection or an exception
+                    Log.i(TAG, "Attempting to connect to Protocol: "+ uuid);
 
-                        Log.e(TAG, "connection error - retry", e);
+                    mmSocket = new NativeBluetoothSocket(mmDevice.createRfcommSocketToServiceRecord(uuid));
+                    mmSocket.connect();
+
+                    isSucceed = true;
+                    break;
+                } catch (Exception e) {
+                    Log.e(TAG, "Native failed. Cancelling.", e);
+                    closeSocket();
+
+                    try {
+                        mmSocket = new FallbackBluetoothSocket(mmSocket.getUnderlyingSocket());
+                        Thread.sleep(500);
+                        mmSocket.connect();
+                        isSucceed = true;
+                        break;
+                    } catch (FallbackException e1) {
+                        Log.e(TAG, "Could not initialize FallbackBluetoothSocket classes.", e);
+                    } catch (InterruptedException e1) {
+                        Log.e(TAG, e1.getMessage(), e1);
+                    } catch (IOException e1) {
+                        closeSocket();
+                        Log.e(TAG, "Fallback failed. Cancelling.", e1);
                     }
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
+            }
+
+            if (!isSucceed) {
                 connectionFailed();
-                // Close the socket
-                try {
-                    mmSocket.close();
-                } catch (Exception e2) {
-                    Log.e(TAG, "unable to close() socket during connection failure", e2);
-                }
                 return;
             }
 
@@ -290,7 +300,7 @@ public class BluetoothClassicService extends BluetoothService {
             }
 
             // Start the connected thread
-            connected(mmSocket, mmDevice);
+            connected(mmSocket.getUnderlyingSocket(), mmDevice);
         }
 
         public void cancel() {
@@ -303,6 +313,17 @@ public class BluetoothClassicService extends BluetoothService {
                 interrupt();
             } catch (Exception e) {
                 Log.e(TAG, "interrupt() of Thread failed", e);
+            }
+        }
+
+        private void closeSocket() {
+            // Close the socket
+            try {
+                if (mmSocket != null) {
+                    mmSocket.close();
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "unable to close() socket during connection failure", e);
             }
         }
     }
